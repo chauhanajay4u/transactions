@@ -112,6 +112,7 @@ router.post("/user/:userId/send-money", auth("userId"), async (req, res) => {
     const comments = req.body.comments ? "'" + req.body.comments + "'" : "''"
     if (!(amount && transactionMode))
         res.status(400).send("Please provide all transactions details")
+    if (Number(amount) > 10000) res.status(400).send("Max Amount is 10000")
     if (!(receiver && receiverIdentifier)) res.status(400).send("Please provide Receiver Details")
     currentBalance = Number(req.user.balance)
     newBalance = currentBalance - amount
@@ -162,6 +163,7 @@ router.post("/user/:userId/request-money", auth("userId"), async (req, res) => {
     const receiver = req.body.receiver
     const comments = req.body.comments ? "'" + req.body.comments + "'" : "''"
     if (!amount) res.status(400).send("Please provide amount")
+    if (Number(amount) > 10000) res.status(400).send("Max Amount is 10000")
     if (!(receiver && receiverIdentifier)) res.status(400).send("Please provide Receiver Details")
     if (receiverIdentifier == "accountId") {
         if (!typeof receiver == "number") res.status(400).send("Account ID should be Number")
@@ -187,7 +189,7 @@ router.post("/user/:userId/request-money", auth("userId"), async (req, res) => {
 router.get("/user/:userId/requests", auth("userId"), async (req, res) => {
     const status = req.query.status ? req.query.status : ""
     results = await dbQuery(
-        `SELECT r.id as request_id, r.created_at as requested_time, r.sender_id, s.name as request_sender, r.comments FROM requests r, users s, users rec WHERE r.sender_id = s.id AND r.receiver_id = rec.id AND r.status = 0 AND rec.id = ${req.user.id} AND r.status LIKE "%${status}%"`
+        `SELECT r.id as request_id, r.created_at as requested_time, r.sender_id, s.name as request_sender, r.comments, r.status FROM requests r, users s, users rec WHERE r.sender_id = s.id AND r.receiver_id = rec.id AND r.status = 0 AND rec.id = ${req.user.id} AND r.status LIKE "%${status}%"`
     )
     res.send(results)
 })
