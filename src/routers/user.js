@@ -74,16 +74,17 @@ router.post("/user/:userId/get-total-amount", auth("userId"), async (req, res) =
 router.post("/user/:userId/transactions", auth("userId"), async (req, res) => {
     const fromDate = req.body.fromDate
     const toDate = req.body.toDate
+    const month = req.body.month
     const receiverName = req.query.receiverName ? req.query.receiverName : ""
     const receiverEmail = req.query.receiverEmail ? req.query.receiverEmail : ""
     const receiverPhone = req.query.receiverPhone ? req.query.receiverPhone : ""
     const type = req.query.type ? req.query.type : ""
     const userId = req.query.userId ? req.query.userId : null
-    if (!(fromDate && toDate)) {
-        res.status(400).send("Please provide Date Range")
-        return true
-    }
-    query = `SELECT * FROM (SELECT a.transaction_id, IF(a.type = 'debit', receiver.id, sender.id) AS account_id, IF(a.type = 'debit', receiver.name, sender.name) AS name, a.type, a.amount, a.transaction_date, a.transaction_type AS mode FROM (SELECT transactions.id AS transaction_id, transactions.amount, transactions.transaction_date, transactions.transaction_type, transactions.sender_id, transactions.receiver_id, IF(transactions.sender_id = ${req.user.id}, 'debit', 'credit') AS type FROM transactions WHERE (transactions.sender_id = ${req.user.id} OR transactions.receiver_id = ${req.user.id})) a, users sender, users receiver WHERE a.sender_id = sender.id AND a.receiver_id = receiver.id AND receiver.name LIKE "%${receiverName}%" AND receiver.email LIKE "%${receiverEmail}%" AND receiver.phone LIKE "%${receiverPhone}%" AND a.type LIKE "%${type}%" AND DATE(transaction_date) >= '${fromDate}' AND DATE(transaction_date) <= '${toDate}') b`
+    query = `SELECT * FROM (SELECT a.transaction_id, IF(a.type = 'debit', receiver.id, sender.id) AS account_id, IF(a.type = 'debit', receiver.name, sender.name) AS name, a.type, a.amount, a.transaction_date, a.transaction_type AS mode FROM (SELECT transactions.id AS transaction_id, transactions.amount, transactions.transaction_date, transactions.transaction_type, transactions.sender_id, transactions.receiver_id, IF(transactions.sender_id = ${req.user.id}, 'debit', 'credit') AS type FROM transactions WHERE (transactions.sender_id = ${req.user.id} OR transactions.receiver_id = ${req.user.id})) a, users sender, users receiver WHERE a.sender_id = sender.id AND a.receiver_id = receiver.id AND receiver.name LIKE "%${receiverName}%" AND receiver.email LIKE "%${receiverEmail}%" AND receiver.phone LIKE "%${receiverPhone}%" AND a.type LIKE "%${type}%"`
+    if (fromDate) query += ` AND DATE(transaction_date) >= '${fromDate}'`
+    if (toDate) query += ` AND DATE(transaction_date) <= '${toDate}'`
+    if (month) query += ` AND MONTH(transaction_date) = '${month}'`
+    query += `) b`
     if (userId) query += ` WHERE account_id = ${userId}`
     query += " ORDER BY transaction_date DESC;"
     results = await dbQuery(query)
