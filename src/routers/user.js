@@ -122,6 +122,8 @@ router.post("/user/:userId/send-money", auth("userId"), async (req, res) => {
         results = await dbQuery(`SELECT * FROM users WHERE id = ${receiver};`)
         if (!results.length) res.status(400).send("Reciver Account ID does not exist")
         receiverUser = results[0]
+        if (receiverUser.id == req.user.id)
+            res.status(400).send("Cannot send money to same account")
         await dbQuery(
             `INSERT INTO transactions (sender_id, receiver_id, amount, transaction_date, transaction_type, comments) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, now(), '${transactionMode}', ${comments});`
         )
@@ -136,6 +138,8 @@ router.post("/user/:userId/send-money", auth("userId"), async (req, res) => {
         )
         if (results.length) {
             receiverUser = results[0]
+            if (receiverUser.id == req.user.id)
+                res.status(400).send("Cannot send money to same account")
             await dbQuery(
                 `INSERT INTO transactions (sender_id, receiver_id, amount, transaction_date, transaction_type, comments) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, now(), '${transactionMode}', ${comments});`
             )
@@ -170,8 +174,10 @@ router.post("/user/:userId/request-money", auth("userId"), async (req, res) => {
         results = await dbQuery(`SELECT * FROM users WHERE id = ${receiver};`)
         if (!results.length) res.status(400).send("Reciver Account ID does not exist")
         receiverUser = results[0]
+        if (receiverUser.id == req.user.id)
+            res.status(400).send("Cannot request money from same account")
         await dbQuery(
-            `INSERT INTO requests (sender_id, receiver_id, amount, comments, status) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, ${comments}, 0);`
+            `INSERT INTO requests (sender_id, receiver_id, amount, comments, status) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, ${comments}, "active");`
         )
     } else {
         results = await dbQuery(
@@ -179,6 +185,8 @@ router.post("/user/:userId/request-money", auth("userId"), async (req, res) => {
         )
         if (!results.length) res.status(404).send("Account with given details doesn't exist")
         receiverUser = results[0]
+        if (receiverUser.id == req.user.id)
+            res.status(400).send("Cannot request money from same account")
         await dbQuery(
             `INSERT INTO requests (sender_id, receiver_id, amount, comments, status) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, ${comments}, 0);`
         )
