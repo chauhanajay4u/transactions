@@ -6,17 +6,18 @@ const router = new express.Router()
 router.post("/user/login", async (req, res) => {
     const email = req.body.email
     const password = req.body.password
-    if (!(email && password)) res.status(401).send("Please provide Email and Password")
-    let results = await dbQuery(
+    if (!(email && password)) res.status(400).send("Please provide Email and Password")
+    results = await dbQuery(
         `SELECT * FROM users WHERE email='${email}' AND password='${password}';`
     )
-    if (!results.length) res.status(404).send({ error: "Unauthorized" })
+    if (!results.length) res.status(401).send({ error: "Unauthorized" })
     user = results[0]
     data = {
         userId: user.id,
         name: user.name,
         email: user.email,
-        phone: user.phone
+        phone: user.phone,
+        balance: user.balance
     }
     res.send(data)
 })
@@ -26,7 +27,8 @@ router.get("/user/:userId/profile", auth("userId"), async (req, res) => {
         userId: req.user.id,
         name: req.user.name,
         email: req.user.email,
-        phone: req.user.phone
+        phone: req.user.phone,
+        balance: req.user.balance
     }
     res.send(data)
 })
@@ -37,7 +39,8 @@ router.post("/user/:userId/profile-update", auth("userId"), async (req, res) => 
         await dbQuery(query)
         data = req.body
         data.userId = req.user.id
-        res.send(req.body)
+        data.balance = req.user.balance
+        res.send(data)
     } catch (e) {
         res.status(400).send("Update Failed")
     }
@@ -50,7 +53,7 @@ router.post("/user/:userId/get-total-amount", auth("userId"), async (req, res) =
     results = await dbQuery(
         `select sum(case when sender_id = ${req.user.id} then amount else null end) as amount_sent, sum(case when receiver_id = ${req.user.id} then amount else null end) as amount_received from transactions where sender_id = ${req.user.id} or receiver_id = ${req.user.id} and date(transaction_date) >= '${fromDate}' and date(transaction_date) <= '${toDate}';`
     )
-    if (!results.length) res.send("No Data Found")
+    if (!results.length) res.status(404).send("No Data Found")
     data = results[0]
     res.send(data)
 })
@@ -61,10 +64,14 @@ router.post("/user/:userId/transactions", auth("userId"), async (req, res) => {
     const receiverName = req.query.receiverName ? req.query.receiverName : ""
     const receiverEmail = req.query.receiverEmail ? req.query.receiverEmail : ""
     const receiverPhone = req.query.receiverPhone ? req.query.receiverPhone : ""
+    const type = req.query.type ? req.query.type : ""
+    const userId = req.query.userId ? req.query.userId : null
     if (!(fromDate && toDate)) res.status(400).send("Please provide Date Range")
-    query = `SELECT a.transaction_id, IF(a.type = 'debit', receiver.id, sender.id) AS account_id, IF(a.type = 'debit', receiver.name, sender.name) AS name, a.type, a.amount, a.transaction_date, a.transaction_type AS mode FROM (SELECT transactions.id AS transaction_id, transactions.amount, transactions.transaction_date, transactions.transaction_type, transactions.sender_id, transactions.receiver_id, IF(transactions.sender_id = ${req.user.id}, 'debit', 'credit') AS type FROM transactions WHERE (transactions.sender_id = ${req.user.id} OR transactions.receiver_id = ${req.user.id})) a, users sender, users receiver WHERE a.sender_id = sender.id AND a.receiver_id = receiver.id AND receiver.name LIKE "%${receiverName}%" AND receiver.email LIKE "%${receiverEmail}%" AND receiver.phone LIKE "%${receiverPhone}%" AND DATE(transaction_date) >= '${fromDate}' AND DATE(transaction_date) <= '${toDate}' ORDER BY transaction_date DESC;`
+    query = `SELECT * FROM (SELECT a.transaction_id, IF(a.type = 'debit', receiver.id, sender.id) AS account_id, IF(a.type = 'debit', receiver.name, sender.name) AS name, a.type, a.amount, a.transaction_date, a.transaction_type AS mode FROM (SELECT transactions.id AS transaction_id, transactions.amount, transactions.transaction_date, transactions.transaction_type, transactions.sender_id, transactions.receiver_id, IF(transactions.sender_id = ${req.user.id}, 'debit', 'credit') AS type FROM transactions WHERE (transactions.sender_id = ${req.user.id} OR transactions.receiver_id = ${req.user.id})) a, users sender, users receiver WHERE a.sender_id = sender.id AND a.receiver_id = receiver.id AND receiver.name LIKE "%${receiverName}%" AND receiver.email LIKE "%${receiverEmail}%" AND receiver.phone LIKE "%${receiverPhone}%" AND a.type LIKE "%${type}%" AND DATE(transaction_date) >= '${fromDate}' AND DATE(transaction_date) <= '${toDate}') b`
+    if (userId) query += ` WHERE account_id = ${userId}`
+    query += " ORDER BY transaction_date DESC;"
     results = await dbQuery(query)
-    if (!results.length) res.send("No Data Found")
+    if (!results.length) res.status(404).send("No Data Found")
     data = results
     res.send(data)
 })
@@ -82,7 +89,7 @@ router.post("/user/:userId/amount-per-month", auth("userId"), async (req, res) =
     results = await dbQuery(
         `select sum(case when t.sender_id = ${req.user.id} then t.amount else null end) as total_amount_sent, sum(case when t.receiver_id = ${req.user.id} then t.amount else null end) as total_amount_received, avg(case when t.sender_id = ${req.user.id} then t.amount else null end) as average_amount_sent, avg(case when t.receiver_id = ${req.user.id} then t.amount else null end) as average_amount_received from transactions t where t.sender_id = ${req.user.id} or t.receiver_id = ${req.user.id} and month(t.transaction_date) = ${month};`
     )
-    if (!results.length) res.send("No Data Found")
+    if (!results.length) res.status(404).send("No Data Found")
     data = results[0]
     res.send(data)
 })
@@ -93,8 +100,128 @@ router.post("/max-amount-for-month", async (req, res) => {
     results = await dbQuery(
         `select t.id as transaction_id, s.name as sender, r.name as receiver, t.amount, t.transaction_date, t.transaction_type from transactions t, users s, users r where t.sender_id = s.id and t.receiver_id = r.id and amount = (select max(amount) from transactions where month(transaction_date) = ${month});`
     )
-    if (!results.length) res.send("No Data Found")
+    if (!results.length) res.status(404).send("No Data Found")
     res.send(results)
+})
+
+router.post("/user/:userId/send-money", auth("userId"), async (req, res) => {
+    const amount = req.body.amount
+    const transactionMode = req.body.transactionMode
+    const receiverIdentifier = req.body.receiverIdentifier
+    const receiver = req.body.receiver
+    const comments = req.body.comments ? "'" + req.body.comments + "'" : "''"
+    if (!(amount && transactionMode))
+        res.status(400).send("Please provide all transactions details")
+    if (!(receiver && receiverIdentifier)) res.status(400).send("Please provide Receiver Details")
+    currentBalance = Number(req.user.balance)
+    newBalance = currentBalance - amount
+    if (newBalance < 0) res.status(400).send("You don't have enough balance")
+    if (receiverIdentifier == "accountId") {
+        if (!typeof receiver == "number") res.status(400).send("Account ID should be Number")
+        results = await dbQuery(`SELECT * FROM users WHERE id = ${receiver};`)
+        if (!results.length) res.status(400).send("Reciver Account ID does not exist")
+        receiverUser = results[0]
+        await dbQuery(
+            `INSERT INTO transactions (sender_id, receiver_id, amount, transaction_date, transaction_type, comments) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, now(), '${transactionMode}', ${comments});`
+        )
+        await dbQuery(`UPDATE users SET balance = ${newBalance} WHERE id = ${req.user.id}`)
+        newReceiverBalance = Number(receiverUser.balance) + amount
+        await dbQuery(
+            `UPDATE users SET balance = ${newReceiverBalance} WHERE id = ${receiverUser.id}`
+        )
+    } else {
+        results = await dbQuery(
+            `SELECT * FROM users WHERE email = '${receiver}' OR phone = '${receiver}';`
+        )
+        if (results.length) {
+            receiverUser = results[0]
+            await dbQuery(
+                `INSERT INTO transactions (sender_id, receiver_id, amount, transaction_date, transaction_type, comments) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, now(), '${transactionMode}', ${comments});`
+            )
+            await dbQuery(`UPDATE users SET balance = ${newBalance} WHERE id = ${req.user.id}`)
+            newReceiverBalance = Number(receiverUser.balance) + amount
+            await dbQuery(
+                `UPDATE users SET balance = ${newReceiverBalance} WHERE id = ${receiverUser.id}`
+            )
+        } else {
+            await dbQuery(
+                `INSERT INTO transactions_in_progress (sender_id, receiver, receiver_identifier, amount, transaction_date, transaction_type, comments) VALUES (${req.user.id}, '${receiver}', '${receiverIdentifier}', ${amount}, null, '${transactionMode}', ${comments});`
+            )
+            await dbQuery(`UPDATE users SET balance = ${newBalance} WHERE id = ${req.user.id}`)
+            res.send(
+                "Account with given details doesn't exist. If user signs up in 15 days money will be transferred, else it will be refunded"
+            )
+        }
+    }
+    res.send("Transaction Completed Succesfully")
+})
+
+router.post("/user/:userId/request-money", auth("userId"), async (req, res) => {
+    const amount = req.body.amount
+    const receiverIdentifier = req.body.receiverIdentifier
+    const receiver = req.body.receiver
+    const comments = req.body.comments ? "'" + req.body.comments + "'" : "''"
+    if (!amount) res.status(400).send("Please provide amount")
+    if (!(receiver && receiverIdentifier)) res.status(400).send("Please provide Receiver Details")
+    if (receiverIdentifier == "accountId") {
+        if (!typeof receiver == "number") res.status(400).send("Account ID should be Number")
+        results = await dbQuery(`SELECT * FROM users WHERE id = ${receiver};`)
+        if (!results.length) res.status(400).send("Reciver Account ID does not exist")
+        receiverUser = results[0]
+        await dbQuery(
+            `INSERT INTO requests (sender_id, receiver_id, amount, comments, status) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, ${comments}, 0);`
+        )
+    } else {
+        results = await dbQuery(
+            `SELECT * FROM users WHERE email = '${receiver}' OR phone = '${receiver}';`
+        )
+        if (!results.length) res.status(404).send("Account with given details doesn't exist")
+        receiverUser = results[0]
+        await dbQuery(
+            `INSERT INTO requests (sender_id, receiver_id, amount, comments, status) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, ${comments}, 0);`
+        )
+    }
+    res.send("Request Sent Successfully")
+})
+
+router.get("/user/:userId/requests", auth("userId"), async (req, res) => {
+    const status = req.query.status ? req.query.status : ""
+    results = await dbQuery(
+        `SELECT r.id as request_id, r.created_at as requested_time, r.sender_id, s.name as request_sender, r.comments FROM requests r, users s, users rec WHERE r.sender_id = s.id AND r.receiver_id = rec.id AND r.status = 0 AND rec.id = ${req.user.id} AND r.status LIKE "%${status}%"`
+    )
+    res.send(results)
+})
+
+router.post("/user/:userId/accept-request", auth("userId"), async (req, res) => {
+    const transactionMode = req.body.transactionMode
+    const requestId = req.body.requestId
+    const action = req.body.action
+    const comments = req.body.comments ? "'" + req.body.comments + "'" : "''"
+    if (!(requestId && action)) res.status(400).send("Invalid Request")
+    results = await dbQuery(`SELECT * FROM requests WHERE id = ${requestId};`)
+    if (!results.length) res.status(400).send("Invalid Request ID")
+    requestObject = results[0]
+    if (req.user.id != requestObject.receiver_id || requestObject.status != "active")
+        res.status(400).send("Invalid Transaction")
+    if (action == "reject") {
+        await dbQuery(`UPDATE requests SET status = 'rejected' WHERE id = ${requestObject.id}`)
+        res.send("Request Rejected Succesfully")
+    }
+    if (!transactionMode) res.status(400).send("Please select mode of transaction")
+    amount = Number(requestObject.amount)
+    currentBalance = Number(req.user.balance)
+    newBalance = currentBalance - amount
+    if (newBalance < 0) res.status(400).send("You don't have enough balance to accept this request")
+    results = await dbQuery(`SELECT * FROM users WHERE id = ${requestObject.receiver_id};`)
+    receiverUser = results[0]
+    await dbQuery(
+        `INSERT INTO transactions (sender_id, receiver_id, amount, transaction_date, transaction_type, comments) VALUES (${req.user.id}, ${requestObject.sender_id}, ${amount}, now(), '${transactionMode}', ${comments});`
+    )
+    await dbQuery(`UPDATE users SET balance = ${newBalance} WHERE id = ${req.user.id}`)
+    newReceiverBalance = Number(receiverUser.balance) + amount
+    await dbQuery(`UPDATE users SET balance = ${newReceiverBalance} WHERE id = ${receiverUser.id}`)
+    await dbQuery(`UPDATE requests SET status = 'accepted' WHERE id = ${requestObject.id}`)
+    res.send("Request Accepted Successfully")
 })
 
 module.exports = router
