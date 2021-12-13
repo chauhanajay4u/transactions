@@ -265,7 +265,7 @@ router.post("/user/:userId/request-money", auth("userId"), async (req, res) => {
             return true
         }
         await dbQuery(
-            `INSERT INTO requests (sender_id, receiver_id, amount, comments, status) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, ${comments}, 0);`
+            `INSERT INTO requests (sender_id, receiver_id, amount, comments, status) VALUES (${req.user.id}, ${receiverUser.id}, ${amount}, ${comments}, "active");`
         )
     }
     res.send("Request Sent Successfully")
